@@ -1,0 +1,12 @@
+auto_ingest:        true
+index:              true
+language:           latin
+author:             Martial
+title:              Epigrams
+online_source_name:
+online_source_link:
+print_source_name:
+print_source_link:
+volumes:
+    - name: Full Text
+      path: martial.epigrams.tess

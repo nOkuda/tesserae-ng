@@ -56,6 +56,7 @@ admin.site.register(SourceTextVolume, SourceTextVolumeAdmin)
 
 class SourceTextSentence(models.Model, DirtyFieldsMixin):
     volume = models.ForeignKey(SourceTextVolume, on_delete=models.PROTECT)
+    parse_type = models.CharField(max_length=255)
     sentence = models.TextField(db_index=False)
     start_line = models.CharField(max_length=255)
     end_line = models.CharField(max_length=255)

@@ -4,6 +4,7 @@ from models import SourceTextSentence
 
 class SourceTextIndex(CelerySearchIndex, indexes.Indexable):
     text = indexes.CharField(model_attr='sentence', document=True)
+    parse_type = indexes.CharField(model_attr='parse_type')
     volume_id = indexes.IntegerField(model_attr='volume__id')
     source_id = indexes.IntegerField(model_attr='volume__source__id')
     volume = indexes.CharField(model_attr='volume__volume')

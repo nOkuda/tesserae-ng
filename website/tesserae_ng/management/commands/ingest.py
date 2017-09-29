@@ -6,7 +6,10 @@ from optparse import make_option
 from os.path import dirname, basename, abspath, exists, isfile, join, isabs
 from django.core.management.base import BaseCommand, CommandError
 from website.tesserae_ng.models import SourceText, SourceTextSentence
-from website.tesserae_ng.core_search import parse_text, get_tess_mode
+from website.tesserae_ng.core_search import parse_text, TESS_MODES
+
+
+MODES_TUPLE = str(tuple(sorted(TESS_MODES.keys())))
 
 
 class Command(BaseCommand):
@@ -184,17 +187,23 @@ class Command(BaseCommand):
                 continue
 
             with open(tess_path, 'r') as text_handle:
-                (text, sentences) = parse_text(text_handle.read())
+                text_value = text_handle.read()
 
-            if None in (text, sentences):
-                raise RuntimeError('Invalid file (probably not .tess format): ' + str(tess_path))
+            parseds = []
+            for parse_type in TESS_MODES:
+                (text, sentences) = parse_text(
+                    text_value, TESS_MODES[parse_type])
+                if None in (text, sentences):
+                    raise RuntimeError('Invalid file (probably not .tess format): ' + str(tess_path))
+                parseds.append((text, sentences, parse_type))
+
 
             self._print_ln(' -> Parsed ' + str(tess_path))
             volume = self._volume_from_data(source_text, volume_name, text)
             if volume.is_dirty():
                 volume.save()
 
-            sent = ' ' + get_tess_mode()
+            sent = ' ' + MODES_TUPLE
             if len(sentences) != 1:
                 sent += 's'
 
@@ -203,9 +212,15 @@ class Command(BaseCommand):
             volume.sourcetextsentence_set.all().delete()
             with reversion.create_revision():
                 #reversion.set_user(request.user)
-                for sent in sentences:
-                    (text, begin, end) = sent
-                    SourceTextSentence.objects.create(volume=volume, sentence=text, start_line=begin, end_line=end)
+                for (text, sentences, parse_type) in parseds:
+                    for sent in sentences:
+                        (text, begin, end) = sent
+                        SourceTextSentence.objects.create(
+                            volume=volume,
+                            parse_type=parse_type,
+                            sentence=text,
+                            start_line=begin,
+                            end_line=end)
 
             self._print_ln(' -> Ingested ' + str(tess_path))
 

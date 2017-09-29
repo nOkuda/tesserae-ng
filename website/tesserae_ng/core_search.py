@@ -318,41 +318,20 @@ def _parse_tess_sentence(text_value):
     return (full_text, sentences)
 
 
-def get_tess_mode():
-    """
-    Get a string describing how to parse .tess files (line or sentence)
-    """
-
-    mode = 'line'
-    try:
-        if settings.TESS_PARSE_MODE != None:
-            if settings.TESS_PARSE_MODE != 'default':
-                mode = settings.TESS_PARSE_MODE
-    except AttributeError:
-        # They didn't define this setting, no biggie
-        pass
-
-    if mode in ('line', 'lines'):
-        return 'line'
-    elif mode in ('sentence', 'sentences'):
-        return 'sentence'
-    else:
-        logger.warn("Invalid tess mode: '" + str(mode) + "', falling back to 'line'")
-        return 'line'
+TESS_MODES = {
+    'line': _parse_tess_line,
+    'sentence': _parse_tess_sentence,
+}
 
 
-def parse_text(text_value):
+def parse_text(text_value, parser):
     """
     Read and parse text from the user, must be in .tess format
     """
-
-    if get_tess_mode() == 'sentence':
-        return _parse_tess_sentence(text_value)
-    else:
-        return _parse_tess_line(text_value)
+    return parser(text_value)
 
 
-def parse_text_from_request(request):
+def parse_text_from_request(request, parser):
     """
     Buffer a request into a string, and try to parse it.
     Should be in .tess format
@@ -367,7 +346,7 @@ def parse_text_from_request(request):
         text_value = io.getvalue()
         io.close()
 
-    return parse_text(text_value)
+    return parse_text(text_value, parser)
 
 
 def submit(request, form):
@@ -378,9 +357,14 @@ def submit(request, form):
     args = {'user': request.user, 'form': form,
             'authenticated': request.user.is_authenticated()}
 
-    (text, sentences) = parse_text_from_request(request)
-    if None in (text, sentences):
-        return _render(request, 'invalid.html', args)
+
+    parseds = []
+    for parse_type in TESS_MODES:
+        (text, sentences) = parse_text_from_request(
+            request, TESS_MODES[parse_type])
+        if None in (text, sentences):
+            return _render(request, 'invalid.html', args)
+        parseds.append((text, sentences, parse_type))
 
     source_text = source_text_from_form(form)
     if source_text.is_dirty():
@@ -393,8 +377,14 @@ def submit(request, form):
     volume.sourcetextsentence_set.all().delete()
     with reversion.create_revision():
         reversion.set_user(request.user)
-        for sent in sentences:
-            (text, begin, end) = sent
-            SourceTextSentence.objects.create(volume=volume, sentence=text, start_line=begin, end_line=end)
+        for (text, sentences, parse_type) in parseds:
+            for sent in sentences:
+                (text, begin, end) = sent
+                SourceTextSentence.objects.create(
+                    volume=volume,
+                    parse_type=parse_type,
+                    sentence=text,
+                    start_line=begin,
+                    end_line=end)
 
     return _render(request, 'submitted.html', args)

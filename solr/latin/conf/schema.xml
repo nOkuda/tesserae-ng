@@ -14,6 +14,7 @@
    <field name="print_source_name" type="text_general" indexed="true" stored="true"/>
    <field name="print_source_url" type="text_general" indexed="true" stored="true"/>
    <field name="text" type="text_latin" indexed="true" stored="true" termVectors="true" termPositions="true" termOffsets="true"/>
+   <field name="parse_type" type="string" indexed="true" stored="true" multiValued="false"/>
    <field name="enabled" type="boolean" indexed="true" stored="true"/>
    <field name="_version_" type="long" indexed="true" stored="true" multiValued="false" />
  </fields>

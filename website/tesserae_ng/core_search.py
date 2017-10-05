@@ -276,7 +276,7 @@ def _parse_tess_line(text_value):
     return (full_text, lines)
 
 
-def _parse_tess_sentence(text_value):
+def _parse_tess_phrase(text_value):
     """
     Read and parse text from the user, must be in .tess format
     """
@@ -320,7 +320,7 @@ def _parse_tess_sentence(text_value):
 
 TESS_MODES = {
     'line': _parse_tess_line,
-    'sentence': _parse_tess_sentence,
+    'phrase': _parse_tess_phrase,
 }
 
 

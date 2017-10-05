@@ -37,3 +37,7 @@ The password is `tesserae` Now run the refresh script (in the `tesserae` user's 
 You'll be prompted for your password. Again, the password is `tesserae` This will update all of the required source files and configuration files and install them in their proper places. You can now visit `http://localhost:8000` to see your changes.
 
 If you're hacking on the Solr code, you can visit the Solr console here: `http://localhost:8080/solr`
+
+Architectural Overview
+----------------------
+A diagram to explain the major components of this code can be found in [these slides](https://docs.google.com/presentation/d/1Ov4g82lHy-YikWz_2v-S08pkF_wH3paRI6rzQlKnWjU/edit?usp=sharing).

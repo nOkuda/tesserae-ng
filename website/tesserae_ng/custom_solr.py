@@ -7,6 +7,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 COMPARE_URL='{0}/compare'
+QUERY_FORM = 'volume_id:{0} AND parse_type:"{1}"'
 
 def _is_sequence(arg):
     return (not hasattr(arg, "strip") and
@@ -27,10 +28,10 @@ def basic_search(source, target, language, start=0, rows=10, stopword_list=None)
 
     get_params = {
         'wt': 'python', # bitchin
-        'tess.sq': 'volume_id:{0}'.format(source.id),
+        'tess.sq': QUERY_FORM.format(source.id, 'line'),
         'tess.sf': 'text',
         'tess.sfl': 'volume,author,text,title',
-        'tess.tq': 'volume_id:{0}'.format(target.id),
+        'tess.tq': QUERY_FORM.format(target.id, 'line'),
         'tess.tf': 'text',
         'tess.tfl': 'volume,author,text,title',
         'start': str(start),

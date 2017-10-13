@@ -1,6 +1,7 @@
 from django import forms
 import logging
 from website.tesserae_ng.models import SourceTextVolume
+from website.tesserae_ng.parse_tess import TESS_MODES
 
 
 logger = logging.getLogger(__name__)
@@ -54,3 +55,18 @@ class SimpleSearchForm(forms.Form):
     start = forms.IntegerField(initial=0, min_value=0, widget=forms.widgets.HiddenInput())
     rows = forms.IntegerField(initial=50, min_value=1, widget=forms.widgets.HiddenInput())
     sw = forms.CharField(min_length=0, max_length=10000, required=False, widget=forms.widgets.HiddenInput())
+
+
+PARSE_TYPES = tuple([(k, k) for k in sorted(TESS_MODES.keys())])
+
+
+class AdvancedSearchForm(forms.Form):
+    """Template for advanced search form"""
+    source = STVChoiceField(queryset=SourceTextVolume.objects, empty_label="Choose a source text")
+    source_parse_unit = forms.ChoiceField(PARSE_TYPES)
+    target = STVChoiceField(queryset=SourceTextVolume.objects, empty_label="Choose a target text")
+    target_parse_unit = forms.ChoiceField(PARSE_TYPES)
+    start = forms.IntegerField(initial=0, min_value=0, widget=forms.widgets.HiddenInput())
+    rows = forms.IntegerField(initial=50, min_value=1, widget=forms.widgets.HiddenInput())
+    sw = forms.CharField(min_length=0, max_length=10000, required=False, widget=forms.widgets.HiddenInput())
+    stopwords_count = forms.IntegerField(initial=10, min_value=0)

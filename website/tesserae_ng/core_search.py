@@ -1,13 +1,11 @@
 import StringIO
-import re
 import logging
 
-from django.http import HttpResponse, Http404
-from django.views.decorators.http import require_GET, require_POST
-from django.conf import settings
-from views import _render
+from django.http import Http404
+from website.tesserae_ng.views import _render
 from website.tesserae_ng.models import SourceText, SourceTextSentence
-from website.tesserae_ng.forms import SimpleSearchForm
+from website.tesserae_ng.forms import SimpleSearchForm, AdvancedSearchForm
+from website.tesserae_ng.parse_tess import TESS_MODES
 import reversion
 
 
@@ -25,10 +23,13 @@ def show_search(request, language, level):
             'form': SimpleSearchForm()}
 
     if language in ('latin', 'greek', 'english'):
-        if language == 'latin' and level == 'basic':
-            return _render(request, 'basic_search.html', args)
-        elif level == 'advanced':
-            return _render(request, 'advanced_search.html', args)
+        if language == 'latin':
+            if level == 'basic':
+                args['form'] = SimpleSearchForm()
+                return _render(request, 'basic_search.html', args)
+            elif level == 'advanced':
+                args['form'] = AdvancedSearchForm()
+                return _render(request, 'advanced_search.html', args)
 
     raise Http404()
 
@@ -45,15 +46,24 @@ def do_search(request, language, level):
         else:
             args = {'language': language, 'user': request.user,
                     'authenticated': request.user.is_authenticated(),
-                    'form': form }
+                    'form': form}
             return _render(request, 'basic_search.html', args)
+    elif level == 'advanced':
+        form = AdvancedSearchForm(request.GET)
+        if form.is_valid():
+            return _search_advanced(request, form, language)
+        else:
+            args = {'language': language, 'user': request.user,
+                    'authenticated': request.user.is_authenticated(),
+                    'form': form}
+            return _render(request, 'advanced_search.html', args)
 
     raise Http404()
 
 
 def _window_pages(page_info, maximum_pages):
     if len(page_info) == 0:
-        return None, None, page_info 
+        return None, None, page_info
     if len(page_info) <= maximum_pages:
         return page_info[0], page_info[-1], page_info
 
@@ -108,7 +118,7 @@ def _search_basic(request, form, language):
     results = basic_search(source, target, language, start=initial_offset,
                            rows=rows_per_page, stopword_list=stop_words)
 
-    if results.has_key('error'):
+    if 'error' in results:
         raise RuntimeError(results['error']['msg'])
 
     qtime = results['responseHeader']['QTime']
@@ -145,7 +155,6 @@ def _search_basic(request, form, language):
             currentEndIndex = currentStartIndex + indicesRemaining - 1
         collected = currentEndIndex - currentStartIndex + 1
         indicesRemaining -= collected
-        currentPageCounter = pageCounter
         pageCounter += 1
 
         href = '/search/' + language + '/basic/search?start=' + \
@@ -155,23 +164,117 @@ def _search_basic(request, form, language):
         if stop_words is not None:
             href += '&sw=' + str(stop_words)
 
-        page = { 'num': pageCounter, 'start': currentStartIndex,
-                 'active': isThisPage(currentStartIndex, currentEndIndex),
-                 'not_first': not first, 'href': href}
+        page = {'num': pageCounter, 'start': currentStartIndex,
+                'active': isThisPage(currentStartIndex, currentEndIndex),
+                'not_first': not first, 'href': href}
 
         pageInfo.append(page)
         first = False
 
     firstPage, lastPage, windowedPages = _window_pages(pageInfo, 9)
 
-    args = { 'language': language, 'user': request.user,
-             'authenticated': request.user.is_authenticated(),
-             'source': source, 'target': target,
-             'qtime': qtime, 'matches': matches,
-             'matchTotal': matchTotal, 'matchStart': matchStart,
-             'matchEnd': matchEnd, 'pageInfo': windowedPages,
-             'firstPage': firstPage, 'lastPage': lastPage,
-             'stopList': stopList, 'stopListStr': stopListStr }
+    args = {'language': language, 'user': request.user,
+            'authenticated': request.user.is_authenticated(),
+            'source': source, 'target': target,
+            'qtime': qtime, 'matches': matches,
+            'matchTotal': matchTotal, 'matchStart': matchStart,
+            'matchEnd': matchEnd, 'pageInfo': windowedPages,
+            'firstPage': firstPage, 'lastPage': lastPage,
+            'stopList': stopList, 'stopListStr': stopListStr}
+
+    return _render(request, 'search_results.html', args)
+
+
+def _search_advanced(request, form, language):
+    """
+    The user wants to do an advanced search
+    """
+
+    from custom_solr import advanced_search
+    source = form.cleaned_data['source']
+    source_parse_unit = form.cleaned_data['source_parse_unit']
+    target = form.cleaned_data['target']
+    target_parse_unit = form.cleaned_data['target_parse_unit']
+    initial_offset = form.cleaned_data['start']
+    rows_per_page = form.cleaned_data['rows']
+
+    stop_words = form.cleaned_data['sw']
+    if stop_words is not None:
+        stop_words = stop_words.strip()
+        if len(stop_words) == 0:
+            stop_words = None
+
+    stopword_count = form.cleaned_data['stopwords_count']
+
+    results = advanced_search(source, target, language, start=initial_offset,
+                              rows=rows_per_page, stopword_list=stop_words,
+                              stopword_count=stopword_count,
+                              source_parse_unit=source_parse_unit,
+                              target_parse_unit=target_parse_unit)
+
+    if 'error' in results:
+        raise RuntimeError(results['error']['msg'])
+
+    qtime = results['responseHeader']['QTime']
+    matches = results['matches']
+    matchTotal = results['matchTotal']
+    matchStart = results['matchOffset'] + 1
+    matchEnd = results['matchOffset'] + results['matchCount']
+    stopList = results['stopList']
+    stopListStr = ', '.join(sorted(stopList))
+
+    myFirstIndex = results['matchOffset']
+    myLastIndex = results['matchOffset'] + results['matchCount'] - 1
+
+    def isThisPage(beginMatchIndex, endMatchIndex):
+        if beginMatchIndex >= myFirstIndex and endMatchIndex <= myLastIndex:
+            return True
+        return False
+
+    indicesRemaining = matchTotal
+    currentStartIndex = None
+
+    pageInfo = []
+    pageCounter = 0
+    first = True
+
+    while indicesRemaining > 0:
+        if currentStartIndex is None:
+            currentStartIndex = 0
+        else:
+            currentStartIndex += rows_per_page
+        if indicesRemaining >= rows_per_page:
+            currentEndIndex = currentStartIndex + rows_per_page - 1
+        else:
+            currentEndIndex = currentStartIndex + indicesRemaining - 1
+        collected = currentEndIndex - currentStartIndex + 1
+        indicesRemaining -= collected
+        pageCounter += 1
+
+        href = '/search/' + language + '/advanced/search?start=' + \
+               str(currentStartIndex) + '&rows=' + str(rows_per_page) + \
+               '&source=' + str(source.id) + '&target=' + str(target.id)
+
+        if stop_words is not None:
+            href += '&sw=' + str(stop_words)
+
+        page = {'num': pageCounter, 'start': currentStartIndex,
+                'active': isThisPage(currentStartIndex, currentEndIndex),
+                'not_first': not first, 'href': href}
+
+        pageInfo.append(page)
+        first = False
+
+    firstPage, lastPage, windowedPages = _window_pages(pageInfo, 9)
+
+    args = {'language': language, 'user': request.user,
+            'authenticated': request.user.is_authenticated(),
+            'source': source, 'target': target,
+            'qtime': qtime, 'matches': matches,
+            'matchTotal': matchTotal, 'matchStart': matchStart,
+            'matchEnd': matchEnd, 'pageInfo': windowedPages,
+            'firstPage': firstPage, 'lastPage': lastPage,
+            'stopList': stopList, 'stopListStr': stopListStr}
 
     return _render(request, 'search_results.html', args)
 
@@ -188,7 +291,9 @@ def create_source_text_from_form(form):
         'enabled': form.cleaned_data['enabled']
     }
 
-    for field in ('online_source_name', 'online_source_link', 'print_source_name', 'print_source_link'):
+    for field in (
+            'online_source_name', 'online_source_link', 'print_source_name',
+            'print_source_link'):
         if field in form.cleaned_data:
             model_args[field] = form.cleaned_data[field]
 
@@ -202,9 +307,10 @@ def source_text_from_form(form):
     """
 
     source_text = None
-    for o in SourceText.objects.all().filter(language=form.cleaned_data['language'],
-                                             author=form.cleaned_data['author'],
-                                             title=form.cleaned_data['title']):
+    for o in SourceText.objects.all().filter(
+            language=form.cleaned_data['language'],
+            author=form.cleaned_data['author'],
+            title=form.cleaned_data['title']):
         source_text = o
         break
 
@@ -212,7 +318,9 @@ def source_text_from_form(form):
         return create_source_text_from_form(form)
 
     source_text.enabled = form.cleaned_data['enabled']
-    for field in ('online_source_name', 'online_source_link', 'print_source_name', 'print_source_link'):
+    for field in (
+            'online_source_name', 'online_source_link', 'print_source_name',
+            'print_source_link'):
         if field in form.cleaned_data:
             setattr(source_text, field, form.cleaned_data[field])
 
@@ -225,7 +333,8 @@ def volume_from_form(source_text, form, full_text):
     Creates a model if one can't be found in the database.
     """
 
-    for vol in source_text.sourcetextvolume_set.filter(volume__iexact=form.cleaned_data['volume']):
+    for vol in source_text.sourcetextvolume_set.filter(
+            volume__iexact=form.cleaned_data['volume']):
         vol.text = full_text
         return vol
 
@@ -233,95 +342,6 @@ def volume_from_form(source_text, form, full_text):
         volume=form.cleaned_data['volume'],
         text=full_text
     )
-
-
-def _parse_tess_line(text_value):
-    """
-    Read and parse text from the user, must be in .tess format
-    """
-
-    if text_value is None:
-        return (None, None)
-
-    # Input files must be in .tess format
-    lines = []
-    rex = r'^<([^>]+)>[\t](.*)$'
-    lrex = r'([0-9]+)(-([0-9]+))?$'
-
-    for line in re.split(r'[\n\r]+', text_value):
-        line = line.strip()
-        if len(line) == 0:
-            continue
-        match = re.match(rex, line)
-        if match is None:
-            continue
-        left = match.group(1)
-        right = match.group(2)
-
-        line_info = re.search(lrex, left)
-        if line_info is not None:
-            start = line_info.group(1)
-            if line_info.group(3) is not None:
-                end = line_info.group(3)
-            else:
-                end = start
-        else:
-            start = 0
-            end = 0
-
-        lines.append((right, start, end))
-
-    full_text = '\n'.join([l[0] for l in lines])
-
-    return (full_text, lines)
-
-
-def _parse_tess_phrase(text_value):
-    """
-    Read and parse text from the user, must be in .tess format
-    """
-
-    if text_value is None:
-        return (None, None)
-
-    (full_text, lines) = _parse_tess_line(text_value)
-
-    sentences = []
-    phrase_delimiter = r'([.?!;:])'
-    only_delimeter = re.compile(r'^[.?!;:]$')
-
-    current_sentence = None
-    for text, start, end in lines:
-        text = text.strip()
-        parts = re.split(phrase_delimiter, text)
-
-        for part in parts:
-            if only_delimeter.match(part) is not None:
-                # This is a delimeter
-                if current_sentence is None:
-                    # Ignore it
-                    pass
-                else:
-                    sentence = (current_sentence[0] + part).strip()
-                    sent_start = current_sentence[1]
-                    sent_end = end
-                    if len(current_sentence[0].strip()) > 0:
-                        sentences.append((sentence, sent_start, sent_end))
-                    current_sentence = None
-            else:
-                # Not a delimeter
-                if current_sentence is None:
-                    current_sentence = (part, start, end)
-                else:
-                    current_sentence = (current_sentence[0] + ' ' + part, current_sentence[1], end)
-
-    return (full_text, sentences)
-
-
-TESS_MODES = {
-    'line': _parse_tess_line,
-    'phrase': _parse_tess_phrase,
-}
 
 
 def parse_text(text_value, parser):
@@ -356,7 +376,6 @@ def submit(request, form):
 
     args = {'user': request.user, 'form': form,
             'authenticated': request.user.is_authenticated()}
-
 
     parseds = []
     for parse_type in TESS_MODES:

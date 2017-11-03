@@ -25,6 +25,9 @@ object TesseraeCompareParams {
   // max distance
   val MD = PREFIX + "md"
 
+  // score cutoff
+  val CUT = PREFIX + "cut"
+
   // minimum common terms
   val MCT = PREFIX + "mct"
 

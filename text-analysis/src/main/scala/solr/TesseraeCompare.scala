@@ -122,6 +122,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     val rows = params.getInt(CommonParams.ROWS, 10)
     val maxDistance = params.getInt(TesseraeCompareParams.MD, DEFAULT_MAX_DISTANCE)
     val stopWords = params.getInt(TesseraeCompareParams.SW, DEFAULT_STOP_WORDS)
+    val scoreCutoff = params.getDouble(TesseraeCompareParams.CUT, DEFAULT_SCORE_CUTOFF)
     val minCommonTerms = params.getInt(TesseraeCompareParams.MCT, DEFAULT_MIN_COMMON_TERMS)
     if (minCommonTerms < 2) {
       throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "min common terms can't be less than 2")
@@ -200,7 +201,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
           val gatherInfoResults = paramsVector.map { qp: QueryParameters => gatherInfo(req, rsp, qp) }.toList
           val sourceInfo = gatherInfoResults(0)
           val targetInfo = gatherInfoResults(1)
-          (compare(sourceInfo, targetInfo, maxDistance, _stoplist, minCommonTerms, metric),
+          (compare(sourceInfo, targetInfo, maxDistance, _stoplist, scoreCutoff, minCommonTerms, metric),
             sourceInfo.fieldList, targetInfo.fieldList, _stoplist, false)
         } finally {
           ctx.stop()
@@ -375,7 +376,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     }
   }
 
-  private def compare(source: QueryInfo, target: QueryInfo, maxDistance: Int, stoplist: MutableSet[String],
+  private def compare(source: QueryInfo, target: QueryInfo, maxDistance: Int, stoplist: MutableSet[String], scoreCutoff: Double,
                       minCommonTerms: Int, distanceMetric: DistanceMetrics.Value)(implicit context: RequestContext): List[CompareResult] = {
 
     time("compare", enabled=false) {
@@ -461,7 +462,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
                 }
 
                 val finalScore = math.log(score / distance.toDouble)
-                if (skip || finalScore < 0.0 || finalScore.isNaN) {
+                if (skip || finalScore < scoreCutoff || finalScore.isNaN) {
                   None
                 } else {
                   val result = CompareResult(pair, seenNonForms, finalScore, distance)
@@ -824,6 +825,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
 object TesseraeCompareHandler {
   val DEFAULT_MAX_DISTANCE = 0 // 0 = no max
   val DEFAULT_STOP_WORDS = 10
+  val DEFAULT_SCORE_CUTOFF = 0.0
   val DEFAULT_MIN_COMMON_TERMS = 2 // can't be less than 2
   val DEFAULT_HIGHLIGHT = false
   val SPLIT_REGEX = ",| ".r

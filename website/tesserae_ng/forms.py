@@ -70,3 +70,4 @@ class AdvancedSearchForm(forms.Form):
     rows = forms.IntegerField(initial=50, min_value=1, widget=forms.widgets.HiddenInput())
     sw = forms.CharField(min_length=0, max_length=10000, required=False, widget=forms.widgets.HiddenInput())
     stopwords_count = forms.IntegerField(initial=10, min_value=0)
+    cutoff = forms.FloatField(initial=0.0)

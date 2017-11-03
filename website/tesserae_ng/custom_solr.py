@@ -77,6 +77,7 @@ def advanced_search(
             kwargs.get('target_parse_unit', 'line')),
         'tess.tf': 'text',
         'tess.tfl': 'volume,author,text,title',
+        'tess.cut': kwargs.get('cutoff', 0.0),
         'start': str(start),
         'rows': str(rows)
     }

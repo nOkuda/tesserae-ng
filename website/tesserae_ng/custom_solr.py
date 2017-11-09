@@ -78,6 +78,8 @@ def advanced_search(
         'tess.tf': 'text',
         'tess.tfl': 'volume,author,text,title',
         'tess.cut': kwargs.get('cutoff', 0.0),
+        'tess.md': kwargs.get('maxdist', 0),
+        'tess.metric': kwargs.get('dibasis', 'freq'),
         'start': str(start),
         'rows': str(rows)
     }

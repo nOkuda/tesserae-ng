@@ -71,3 +71,16 @@ class AdvancedSearchForm(forms.Form):
     sw = forms.CharField(min_length=0, max_length=10000, required=False, widget=forms.widgets.HiddenInput())
     stopwords_count = forms.IntegerField(initial=10, min_value=0)
     cutoff = forms.FloatField(initial=0.0)
+    maximum_distance = forms.IntegerField(initial=0, min_value=0)
+    distance_basis = forms.ChoiceField(
+        initial='freq',
+        # TODO decide how best to keep these options up to date
+        choices=(
+            ('freq', 'lowest frequency (source and target)'),
+            ('freq_source', 'lowest frequency (source only)'),
+            ('freq_target', 'lowest frequency (target only)'),
+            ('span', 'farthest apart (source and target)'),
+            ('span_source', 'farthest apart (source only)'),
+            ('span_target', 'farthest apart (target only)')
+        )
+    )

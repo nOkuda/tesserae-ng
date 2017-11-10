@@ -25,7 +25,7 @@ import org.tesserae.EhcacheManager
 import java.io.{FileWriter, File}
 import org.apache.solr.analysis.corpus.LatinCorpusDatabase
 
-import collection.mutable.{Map => MutableMap, Set => MutableSet,
+import collection.mutable.{Map => MutableMap, Set => MutableSet, MutableList,
                            HashMap => MutableHashMap, HashSet => MutableHashSet}
 import java.util.UUID
 
@@ -106,6 +106,66 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     TimerUtils.printRequestStats
   }
 
+  private def getTopNByFreq(n: Int, freqInfo: FrequencyMap)(implicit context: RequestContext): List[TermFrequencyEntry] = {
+    var tmp = new MutableList[TermFrequencyEntry]
+    val dummy = TermFrequencyEntry("", -1.0)
+    for (_ <- 1 to n) {
+      tmp += dummy
+    }
+
+    var lowestFreq = -1.0
+    var lowestPos = 0
+    for ((term, freq) <- freqInfo) {
+      if (freq > tmp(lowestPos).frequency) {
+        tmp(lowestPos) = TermFrequencyEntry(term, freq)
+      }
+      lowestFreq = tmp(0).frequency
+      lowestPos = 0
+      for (i <- 1 to n-1) {
+        if (tmp(i).frequency < lowestFreq) {
+          lowestFreq = tmp(i).frequency
+          lowestPos = i
+        }
+      }
+    }
+
+    var frequencies : List[TermFrequencyEntry] = Nil
+    tmp.foreach { entry =>
+      if (entry.frequency > 0.0) {
+        frequencies = entry :: frequencies
+      }
+    }
+    frequencies
+  }
+
+  private def buildStopListByFreq(n: Int, freqInfo: FrequencyMap)(implicit context: RequestContext): MutableSet[String] = {
+    var stoplist: MutableSet[String] = new MutableHashSet[String]
+    val topNByFreq = getTopNByFreq(n, freqInfo)
+    topNByFreq.foreach { entry =>
+      stoplist += entry.term
+    }
+    stoplist
+  }
+
+  private def buildStopListByFreqs(n: Int, freqInfo1: FrequencyMap, freqInfo2: FrequencyMap)(implicit context: RequestContext): MutableSet[String] = {
+    var stoplist: MutableSet[String] = new MutableHashSet[String]
+    var topNByFreq1 = getTopNByFreq(n, freqInfo1)
+    var topNByFreq2 = getTopNByFreq(n, freqInfo2)
+    val dummy = TermFrequencyEntry("", -1.0)
+    while (stoplist.size < n && (!topNByFreq1.isEmpty || !topNByFreq2.isEmpty)) {
+      val first1 = if (!topNByFreq1.isEmpty) topNByFreq1.head else dummy
+      val first2 = if (!topNByFreq2.isEmpty) topNByFreq2.head else dummy
+      if (first1.frequency > first2.frequency) {
+        stoplist += first1.term
+        topNByFreq1 = topNByFreq1.tail
+      } else {
+        stoplist += first2.term
+        topNByFreq2 = topNByFreq2.tail
+      }
+    }
+    stoplist
+  }
+
   private def internalHandleRequestBody(req: SolrQueryRequest, rsp: SolrQueryResponse)(implicit context: RequestContext) {
     val params = req.getParams
     val returnFields = new SolrReturnFields(req)
@@ -128,7 +188,8 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
       throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "min common terms can't be less than 2")
     }
 
-    val callerStartListString = params.get(TesseraeCompareParams.SL, null)
+    val callerStopListString = params.get(TesseraeCompareParams.SL, "").trim
+    val stbasis = params.get(TesseraeCompareParams.SB, DEFAULT_STOP_BASIS)
 
     val metricStr = params.get(TesseraeCompareParams.METRIC)
     val metric = if (metricStr == null) {
@@ -150,7 +211,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
       CacheKey(maxDistance, minCommonTerms, metric,
         params.get(TesseraeCompareParams.SQ), params.get(TesseraeCompareParams.SF), params.get(TesseraeCompareParams.SFL),
         params.get(TesseraeCompareParams.TQ), params.get(TesseraeCompareParams.TF), params.get(TesseraeCompareParams.TFL),
-        stopWords, callerStartListString)
+        stopWords, callerStopListString)
 
     var cachedResults: Option[CacheValue] = None
     if (readCache) {
@@ -184,24 +245,26 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
           // TODO construct stopwords list based on specified option
           val _stoplist: MutableSet[String] = if (stopWords <= 0) {
             new MutableHashSet
-          } else {
-            if (callerStartListString != null) {
-              val normalized = callerStartListString.trim
-              if (!normalized.isEmpty) {
-                val tmp = new MutableHashSet[String]
-                SPLIT_REGEX.split(normalized).toList.foreach { stopWord =>
-                  if (tmp.size < stopWords) {
-                    tmp += stopWord
-                  }
-                }
-
-                tmp
-              } else {
-                corpusDB.getTopN(stopWords)
+          } else if (!callerStopListString.isEmpty) {
+            val tmp = new MutableHashSet[String]
+            SPLIT_REGEX.split(callerStopListString).toList.foreach { stopWord =>
+              if (tmp.size < stopWords) {
+                tmp += stopWord
               }
-            } else {
-              corpusDB.getTopN(stopWords)
             }
+
+            tmp
+          } else if (stbasis == "both") {
+            // TODO figure out why when stbasis is not "corpus", solr gets an
+            // internal server error only after being hit multiple times
+            buildStopListByFreqs(stopWords, sourceFrequencies, targetFrequencies)
+          } else if (stbasis == "source") {
+            buildStopListByFreq(stopWords, sourceFrequencies)
+          } else if (stbasis == "target") {
+            buildStopListByFreq(stopWords, sourceFrequencies)
+          } else {
+            // stbasis == "corpus"
+            corpusDB.getTopN(stopWords)
           }
 
           (compare(sourceInfo, sourceMash, sourceFrequencies, targetInfo, targetMash, targetFrequencies, maxDistance, _stoplist, scoreCutoff, minCommonTerms, metric),
@@ -839,6 +902,7 @@ object TesseraeCompareHandler {
   val DEFAULT_STOP_WORDS = 10
   val DEFAULT_SCORE_CUTOFF = 0.0
   val DEFAULT_MIN_COMMON_TERMS = 2 // can't be less than 2
+  val DEFAULT_STOP_BASIS = "corpus"
   val DEFAULT_HIGHLIGHT = false
   val SPLIT_REGEX = ",| ".r
 }

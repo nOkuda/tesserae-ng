@@ -174,6 +174,14 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
       case None => {
         val ctx = CommonMetrics.uncachedCompareTime.time()
         try {
+          val paramsVector = ParVector(sourceParams, targetParams)
+          paramsVector.tasksupport = new ForkJoinTaskSupport(workerPool)
+          val gatherInfoResults = paramsVector.map { qp: QueryParameters => gatherInfo(req, rsp, qp) }.toList
+          val sourceInfo = gatherInfoResults(0)
+          val targetInfo = gatherInfoResults(1)
+          // TODO use mashes to get correct stoplist
+          val (sourceMash, sourceFrequencies, targetMash, targetFrequencies) = buildMashAndFreq(sourceInfo, targetInfo)
+          // TODO construct stopwords list based on specified option
           val _stoplist: MutableSet[String] = if (stopWords <= 0) {
             new MutableHashSet
           } else {
@@ -196,12 +204,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
             }
           }
 
-          val paramsVector = ParVector(sourceParams, targetParams)
-          paramsVector.tasksupport = new ForkJoinTaskSupport(workerPool)
-          val gatherInfoResults = paramsVector.map { qp: QueryParameters => gatherInfo(req, rsp, qp) }.toList
-          val sourceInfo = gatherInfoResults(0)
-          val targetInfo = gatherInfoResults(1)
-          (compare(sourceInfo, targetInfo, maxDistance, _stoplist, scoreCutoff, minCommonTerms, metric),
+          (compare(sourceInfo, sourceMash, sourceFrequencies, targetInfo, targetMash, targetFrequencies, maxDistance, _stoplist, scoreCutoff, minCommonTerms, metric),
             sourceInfo.fieldList, targetInfo.fieldList, _stoplist, false)
         } finally {
           ctx.stop()
@@ -376,26 +379,32 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     }
   }
 
-  private def compare(source: QueryInfo, target: QueryInfo, maxDistance: Int, stoplist: MutableSet[String], scoreCutoff: Double,
+  private def buildMashAndFreq(source: QueryInfo, target: QueryInfo)(implicit context: RequestContext): (Mash, FrequencyMap, Mash, FrequencyMap) = {
+    // A mash maps one term to a set of document ids. Build them in parallel.
+    val parvector = ParVector((source, true), (target, false))
+    parvector.tasksupport = new ForkJoinTaskSupport(workerPool)
+
+    val mashAndFreqResults = time("buildMash & frequency stuff", enabled=false) {
+      parvector.map { case (qi: QueryInfo, b: Boolean) =>
+        val mash = buildMash(qi)
+        val frequencyInfo = buildTermFrequencies(qi)
+        val digested = getFrequencies(frequencyInfo)
+        (mash, digested)
+      }.toList
+    }
+
+    val (sourceMash, sourceFrequencies) = mashAndFreqResults(0)
+    val (targetMash, targetFrequencies) = mashAndFreqResults(1)
+
+    (sourceMash, sourceFrequencies, targetMash, targetFrequencies)
+  }
+
+  private def compare(source: QueryInfo, sourceMash: Mash, sourceFrequencies: FrequencyMap,
+                      target: QueryInfo, targetMash: Mash, targetFrequencies: FrequencyMap,
+                      maxDistance: Int, stoplist: MutableSet[String], scoreCutoff: Double,
                       minCommonTerms: Int, distanceMetric: DistanceMetrics.Value)(implicit context: RequestContext): List[CompareResult] = {
 
     time("compare", enabled=false) {
-
-      // A mash maps one term to a set of document ids. Build them in parallel.
-      val parvector = ParVector((source, true), (target, false))
-      parvector.tasksupport = new ForkJoinTaskSupport(workerPool)
-
-      val mashAndFreqResults = time("buildMash & frequency stuff", enabled=false) {
-        parvector.map { case (qi: QueryInfo, b: Boolean) =>
-          val mash = buildMash(qi)
-          val frequencyInfo = buildTermFrequencies(qi)
-          val digested = getFrequencies(frequencyInfo)
-          (mash, digested)
-        }.toList
-      }
-
-      val (sourceMash, sourceFrequencies) = mashAndFreqResults(0)
-      val (targetMash, targetFrequencies) = mashAndFreqResults(1)
 
       // Find the overlapping documents
       val foundPairs = time ("findDocumentPairs", enabled=false) {
@@ -417,6 +426,9 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
 
       val distMetric = getMetric(distanceMetric, maxDistance)
 
+      // TODO use corpusFrequencies when freq_basis is set to corpus (however,
+      // it probably won't work to query for the entire corpus at once)
+      //
       // Build up information about the source and target frequencies
       val frequencyInfo = DigestedFrequencyInfo(sourceFrequencies, targetFrequencies)
 

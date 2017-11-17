@@ -143,29 +143,19 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     var stoplist: MutableSet[String] = new MutableHashSet[String]
     val topNByFreq = getTopNByFreq(n, freqInfo)
     topNByFreq.foreach { entry =>
-      // TODO figure out how to get lemmatized form of term
       stoplist += entry.term
     }
     stoplist
   }
 
   private def buildStopListByFreqs(n: Int, freqInfo1: FrequencyMap, freqInfo2: FrequencyMap)(implicit context: RequestContext): MutableSet[String] = {
-    var stoplist: MutableSet[String] = new MutableHashSet[String]
-    var topNByFreq1 = getTopNByFreq(n, freqInfo1)
-    var topNByFreq2 = getTopNByFreq(n, freqInfo2)
-    val dummy = TermFrequencyEntry("", -1.0)
-    while (stoplist.size < n && (!topNByFreq1.isEmpty || !topNByFreq2.isEmpty)) {
-      val first1 = if (!topNByFreq1.isEmpty) topNByFreq1.head else dummy
-      val first2 = if (!topNByFreq2.isEmpty) topNByFreq2.head else dummy
-      if (first1.frequency > first2.frequency) {
-        stoplist += first1.term
-        topNByFreq1 = topNByFreq1.tail
-      } else {
-        stoplist += first2.term
-        topNByFreq2 = topNByFreq2.tail
+    var freqMap = new MutableHashMap[String, Double]
+    for ((term, freq) <- freqInfo1) {
+      if (freqInfo2.contains(term)) {
+        freqMap += term -> (freq + freqInfo2(term)) / 2.0
       }
     }
-    stoplist
+    buildStopListByFreq(n, freqMap)
   }
 
   private def internalHandleRequestBody(req: SolrQueryRequest, rsp: SolrQueryResponse)(implicit context: RequestContext) {
@@ -245,9 +235,6 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
           val gatherInfoResults = paramsVector.map { qp: QueryParameters => gatherInfo(req, rsp, qp) }.toList
           val sourceInfo = gatherInfoResults(0)
           val targetInfo = gatherInfoResults(1)
-          // TODO if buildLemmaFrequencies works, push buildMashAndFreq down
-          // into compare
-          val (sourceMash, sourceFrequencies, targetMash, targetFrequencies) = buildMashAndFreq(sourceInfo, targetInfo)
           bw.write("Query for stbasis: " + stbasis + "\n")
           val _stoplist: MutableSet[String] = if (stopWords <= 0) {
             new MutableHashSet
@@ -261,8 +248,6 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
 
             tmp
           } else if (stbasis == "both") {
-            // TODO figure out why when stbasis is not "corpus", solr gets an
-            // internal server error only after being hit multiple times
             val sourceLemmaFreqs = getFrequencies(buildLemmaFrequencies(sourceInfo))
             val targetLemmaFreqs = getFrequencies(buildLemmaFrequencies(targetInfo))
             val rv = buildStopListByFreqs(stopWords, sourceLemmaFreqs, targetLemmaFreqs)
@@ -293,7 +278,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
             rv
           }
 
-          (compare(sourceInfo, sourceMash, sourceFrequencies, targetInfo, targetMash, targetFrequencies, maxDistance, _stoplist, scoreCutoff, minCommonTerms, metric),
+          (compare(sourceInfo, targetInfo, maxDistance, _stoplist, scoreCutoff, minCommonTerms, metric),
             sourceInfo.fieldList, targetInfo.fieldList, _stoplist, false)
         } finally {
           ctx.stop()
@@ -494,12 +479,13 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     (sourceMash, sourceFrequencies, targetMash, targetFrequencies)
   }
 
-  private def compare(source: QueryInfo, sourceMash: Mash, sourceFrequencies: FrequencyMap,
-                      target: QueryInfo, targetMash: Mash, targetFrequencies: FrequencyMap,
+  private def compare(source: QueryInfo,
+                      target: QueryInfo,
                       maxDistance: Int, stoplist: MutableSet[String], scoreCutoff: Double,
                       minCommonTerms: Int, distanceMetric: DistanceMetrics.Value)(implicit context: RequestContext): List[CompareResult] = {
 
     time("compare", enabled=false) {
+      val (sourceMash, sourceFrequencies, targetMash, targetFrequencies) = buildMashAndFreq(source, target)
 
       // Find the overlapping documents
       val foundPairs = time ("findDocumentPairs", enabled=false) {

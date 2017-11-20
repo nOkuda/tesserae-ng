@@ -84,3 +84,13 @@ class AdvancedSearchForm(forms.Form):
             ('span_target', 'farthest apart (target only)')
         )
     )
+    stoplist_basis = forms.ChoiceField(
+        initial='corpus',
+        # TODO decide how best to keep these options up to date
+        choices=(
+            ('corpus', 'corpus'),
+            ('source', 'source only'),
+            ('target', 'target only'),
+            ('both', 'both source and target')
+        )
+    )

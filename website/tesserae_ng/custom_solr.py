@@ -80,6 +80,7 @@ def advanced_search(
         'tess.cut': kwargs.get('cutoff', 0.0),
         'tess.md': kwargs.get('maxdist', 0),
         'tess.metric': kwargs.get('dibasis', 'freq'),
+        'tess.sb': kwargs.get('stbasis', 'corpus'),
         'start': str(start),
         'rows': str(rows)
     }

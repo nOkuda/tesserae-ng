@@ -198,6 +198,7 @@ def _search_advanced(request, form, language):
     cutoff = form.cleaned_data['cutoff']
     maxdist = form.cleaned_data['maximum_distance']
     dibasis = form.cleaned_data['distance_basis']
+    stbasis = form.cleaned_data['stoplist_basis']
     initial_offset = form.cleaned_data['start']
     rows_per_page = form.cleaned_data['rows']
 
@@ -214,7 +215,8 @@ def _search_advanced(request, form, language):
                               stopword_count=stopword_count,
                               source_parse_unit=source_parse_unit,
                               target_parse_unit=target_parse_unit,
-                              cutoff=cutoff, maxdist=maxdist, dibasis=dibasis)
+                              cutoff=cutoff, maxdist=maxdist, dibasis=dibasis,
+                              stbasis=stbasis)
 
     if 'error' in results:
         raise RuntimeError(results['error']['msg'])

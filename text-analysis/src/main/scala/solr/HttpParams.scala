@@ -49,6 +49,9 @@ object TesseraeCompareParams {
   // stopword list basis
   val SB = PREFIX + "sb"
 
+  // frequency basis
+  val FB = PREFIX + "fb"
+
   // include highlight info?
   val HIGHLIGHT = PREFIX + "highlight"
 }

@@ -8,7 +8,8 @@ import org.iq80.leveldb.{ReadOptions, DBException}
 import scala.Some
 import org.apache.solr.handler.tesserae.metrics.CommonMetrics
 
-import collection.mutable.{Set => MutableSet, HashSet => MutableHashSet}
+import collection.mutable.{Set => MutableSet, HashSet => MutableHashSet,
+                           Map => MutableMap, HashMap => MutableHashMap}
 
 import scala.util.control.Breaks._
 
@@ -140,6 +141,63 @@ class LatinCorpusDatabase(cacheName: Option[String], dbLocation: File) {
             }
 
             set
+          } finally {
+            iterator.close()
+          }
+        } finally {
+          snapshot.close()
+          lock.readLock().lock()
+        }
+      } finally {
+        lock.readLock().unlock()
+      }
+    } finally {
+      timer.stop()
+    }
+  }
+
+  def getCorpusFrequencies(wantForm: Boolean = false): MutableMap[String, Double] = {
+    val timer = CommonMetrics.readTopN.time()
+    var rv = new MutableHashMap[String, Double]
+    var total: Double = 0.0
+    try {
+      lock.readLock().lock()
+      try {
+        val snapshot = db.getSnapshot
+        try {
+          lock.readLock().unlock()
+          val opts = new ReadOptions
+          opts.fillCache(false)
+          opts.verifyChecksums(false)
+          opts.snapshot(snapshot)
+
+          val iterator = db.iterator(opts)
+          try {
+            iterator.seekToFirst()
+            var unsortedList: List[(String, Int)] = Nil
+            while (iterator.hasNext) {
+              val entry = iterator.next()
+              val key = new String(entry.getKey, "UTF-8")
+              val value = fromByteArray(entry.getValue)
+              unsortedList = (key, value) :: unsortedList
+              val isForm = key.startsWith("_")
+              if (isForm == wantForm) {
+                total += value
+              }
+            }
+
+            unsortedList.foreach { case (term, count) =>
+              val isForm = term.startsWith("_")
+              if (isForm == wantForm) {
+                if (isForm) {
+                  rv += term.substring(1) -> count / total
+                } else {
+                  rv += term -> count / total
+                }
+              }
+            }
+
+            rv
           } finally {
             iterator.close()
           }

@@ -182,6 +182,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
 
     val callerStopListString = params.get(TesseraeCompareParams.SL, "").trim
     val stbasis = params.get(TesseraeCompareParams.SB, DEFAULT_STOP_BASIS)
+    val freqbasis = params.get(TesseraeCompareParams.FB, DEFAULT_FREQ_BASIS)
 
     val metricStr = params.get(TesseraeCompareParams.METRIC)
     val metric = if (metricStr == null) {
@@ -278,7 +279,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
             rv
           }
 
-          (compare(sourceInfo, targetInfo, maxDistance, _stoplist, scoreCutoff, minCommonTerms, metric),
+          (compare(sourceInfo, targetInfo, freqbasis, maxDistance, _stoplist, scoreCutoff, minCommonTerms, metric),
             sourceInfo.fieldList, targetInfo.fieldList, _stoplist, false)
         } finally {
           ctx.stop()
@@ -481,6 +482,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
 
   private def compare(source: QueryInfo,
                       target: QueryInfo,
+                      freqBasis: String,
                       maxDistance: Int, stoplist: MutableSet[String], scoreCutoff: Double,
                       minCommonTerms: Int, distanceMetric: DistanceMetrics.Value)(implicit context: RequestContext): List[CompareResult] = {
 
@@ -520,11 +522,14 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
       val distMetric = getMetric(distanceMetric, maxDistance)
 
       bw.write("Starting DigestedFrequencyInfo\n")
-      // TODO use corpusFrequencies when freq_basis is set to corpus (however,
-      // it probably won't work to query for the entire corpus at once)
-      //
-      // Build up information about the source and target frequencies
-      val frequencyInfo = DigestedFrequencyInfo(sourceFrequencies, targetFrequencies)
+      val frequencyInfo = if (freqBasis != "corpus") {
+        // Build up information about the source and target frequencies
+        DigestedFrequencyInfo(sourceFrequencies, targetFrequencies)
+      } else {
+        // Build up information about corpus frequencies
+        val corpusFrequencies = corpusDB.getCorpusFrequencies()
+        DigestedFrequencyInfo(corpusFrequencies, corpusFrequencies)
+      }
 
       // Calculate the scores and distances in parallel
       val parallelPairs = docPairs.par
@@ -548,7 +553,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
 
                 pairInfo.sourceTerms.foreach { case (TermPosition(term, _, _, _), nonForms) =>
                   seenNonForms += nonForms.toList.sorted.mkString("-")
-                  val sourceScore = 1.0 / sourceFrequencies.getOrElse(term, -1.0)
+                  val sourceScore = 1.0 / frequencyInfo.sourceFrequencies.getOrElse(term, -1.0)
                   if (sourceScore < 0.0) {
                     logger.warn("No source term frequency information available for term: `" + term + "'")
                     skip = true
@@ -559,7 +564,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
 
                 pairInfo.targetTerms.foreach { case (TermPosition(term, _, _, _), nonForms) =>
                   seenNonForms += nonForms.toList.sorted.mkString("-")
-                  val targetScore = 1.0 / targetFrequencies.getOrElse(term, -1.0)
+                  val targetScore = 1.0 / frequencyInfo.targetFrequencies.getOrElse(term, -1.0)
                   if (targetScore < 0.0) {
                     logger.warn("No target term frequency information available for term: `" + term + "'")
                     skip = true
@@ -972,6 +977,7 @@ object TesseraeCompareHandler {
   val DEFAULT_SCORE_CUTOFF = 0.0
   val DEFAULT_MIN_COMMON_TERMS = 2 // can't be less than 2
   val DEFAULT_STOP_BASIS = "corpus"
+  val DEFAULT_FREQ_BASIS = "texts"
   val DEFAULT_HIGHLIGHT = false
   val SPLIT_REGEX = ",| ".r
 }

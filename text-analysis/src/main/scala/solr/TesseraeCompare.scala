@@ -480,6 +480,65 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     (sourceMash, sourceFrequencies, targetMash, targetFrequencies)
   }
 
+  private def buildTextCorpusFrequencies(queryInfo: QueryInfo, corpusNonFormFrequencies: FrequencyMap)(implicit context: RequestContext): FrequencyMap = {
+    time("buildTextCorpusFrequencies", enabled=false) {
+      val countByWord: MutableMap[String, Int] = new MutableHashMap
+      val byFeature: MutableMap[String, MutableSet[String]] = new MutableHashMap
+      val wordsToStems: MutableMap[String, MutableSet[String]] = new MutableHashMap
+
+      queryInfo.termInfo.foreach { case (docId, dti) =>
+        dti.formTermCounts.foreach { case (term, count) =>
+          val theCount = count + countByWord.getOrElse(term, 0)
+          countByWord += term -> theCount
+        }
+
+        dti.nonFormTermCounts.foreach { case (term, count) =>
+          val form = dti.nf2f(term).term
+          val set1: MutableSet[String] = byFeature.get(term) match {
+            case Some(s) => s
+            case None => {
+              val tmp = new MutableHashSet[String]
+              byFeature += term -> tmp
+              tmp
+            }
+          }
+
+          set1 += form
+
+          val set2: MutableSet[String] = wordsToStems.get(form) match {
+            case Some(s) => s
+            case None => {
+              val tmp = new MutableHashSet[String]
+              wordsToStems += form -> tmp
+              tmp
+            }
+          }
+
+          set2 += term
+        }
+      }
+
+      val finalFrequencies = new MutableHashMap[String, Double]
+
+      val file = new File("/tmp/textCorpFreqs.txt")
+      val bw = new BufferedWriter(new FileWriter(file))
+      try {
+      for ((term, lemmata) <- wordsToStems) {
+        var freq_values: Double = 0.0
+        lemmata.foreach { lemma =>
+          freq_values += corpusNonFormFrequencies.getOrElse(lemma, 0.0)
+        }
+        bw.write(term + "\t" + freq_values.toString + lemmata.size.toString + "\n")
+        finalFrequencies += term -> freq_values / lemmata.size
+      }
+      } finally {
+      bw.close()
+      }
+
+      finalFrequencies
+    }
+  }
+
   private def compare(source: QueryInfo,
                       target: QueryInfo,
                       freqBasis: String,
@@ -527,8 +586,13 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
         DigestedFrequencyInfo(sourceFrequencies, targetFrequencies)
       } else {
         // Build up information about corpus frequencies
-        val corpusFrequencies = corpusDB.getCorpusFrequencies()
-        DigestedFrequencyInfo(corpusFrequencies, corpusFrequencies)
+        val corpusNonFormFrequencies = corpusDB.getCorpusFrequencies()
+        bw.write("Finished corpus frequencies\n")
+        val sourceCorpusFrequencies = buildTextCorpusFrequencies(source, corpusNonFormFrequencies)
+        bw.write("Finished source corpus frequencies\n")
+        val targetCorpusFrequencies = buildTextCorpusFrequencies(target, corpusNonFormFrequencies)
+        bw.write("Finished target corpus frequencies\n")
+        DigestedFrequencyInfo(sourceCorpusFrequencies, targetCorpusFrequencies)
       }
 
       // Calculate the scores and distances in parallel

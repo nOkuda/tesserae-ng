@@ -81,6 +81,7 @@ def advanced_search(
         'tess.md': kwargs.get('maxdist', 0),
         'tess.metric': kwargs.get('dibasis', 'freq'),
         'tess.sb': kwargs.get('stbasis', 'corpus'),
+        'tess.fb': kwargs.get('freqbasis', 'texts'),
         'start': str(start),
         'rows': str(rows)
     }

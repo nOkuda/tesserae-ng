@@ -204,7 +204,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
       CacheKey(maxDistance, minCommonTerms, metric,
         params.get(TesseraeCompareParams.SQ), params.get(TesseraeCompareParams.SF), params.get(TesseraeCompareParams.SFL),
         params.get(TesseraeCompareParams.TQ), params.get(TesseraeCompareParams.TF), params.get(TesseraeCompareParams.TFL),
-        stopWords, callerStopListString, stbasis)
+        stopWords, callerStopListString, stbasis, freqbasis)
 
     var cachedResults: Option[CacheValue] = None
     if (readCache) {

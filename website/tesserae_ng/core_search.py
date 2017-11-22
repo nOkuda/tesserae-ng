@@ -199,6 +199,7 @@ def _search_advanced(request, form, language):
     maxdist = form.cleaned_data['maximum_distance']
     dibasis = form.cleaned_data['distance_basis']
     stbasis = form.cleaned_data['stoplist_basis']
+    freqbasis = form.cleaned_data['frequency_basis']
     initial_offset = form.cleaned_data['start']
     rows_per_page = form.cleaned_data['rows']
 
@@ -216,7 +217,7 @@ def _search_advanced(request, form, language):
                               source_parse_unit=source_parse_unit,
                               target_parse_unit=target_parse_unit,
                               cutoff=cutoff, maxdist=maxdist, dibasis=dibasis,
-                              stbasis=stbasis)
+                              stbasis=stbasis, freqbasis=freqbasis)
 
     if 'error' in results:
         raise RuntimeError(results['error']['msg'])

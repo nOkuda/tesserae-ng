@@ -94,3 +94,11 @@ class AdvancedSearchForm(forms.Form):
             ('both', 'both source and target')
         )
     )
+    frequency_basis = forms.ChoiceField(
+        initial='texts',
+        # TODO decide how best to keep these options up to date
+        choices=(
+            ('texts', 'texts'),
+            ('corpus', 'corpus')
+        )
+    )

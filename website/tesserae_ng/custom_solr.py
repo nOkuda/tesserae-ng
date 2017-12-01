@@ -82,6 +82,7 @@ def advanced_search(
         'tess.metric': kwargs.get('dibasis', 'freq'),
         'tess.sb': kwargs.get('stbasis', 'corpus'),
         'tess.fb': kwargs.get('freqbasis', 'texts'),
+        'tess.scb': kwargs.get('scorebasis', 'stem'),
         'start': str(start),
         'rows': str(rows)
     }

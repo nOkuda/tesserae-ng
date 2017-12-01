@@ -102,3 +102,11 @@ class AdvancedSearchForm(forms.Form):
             ('corpus', 'corpus')
         )
     )
+    score_basis = forms.ChoiceField(
+        # TODO decide how best to keep these options up to date
+        initial='stem',
+        choices=(
+            ('stem', 'stem'),
+            ('word', 'word')
+        )
+    )

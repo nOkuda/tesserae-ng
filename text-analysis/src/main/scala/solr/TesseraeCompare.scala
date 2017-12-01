@@ -107,7 +107,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     TimerUtils.printRequestStats
   }
 
-  private def getTopNByFreq(n: Int, freqInfo: FrequencyMap)(implicit context: RequestContext): List[TermFrequencyEntry] = {
+  private def getTopNByFreq(n: Int, freqInfo: FrequencyMap): List[TermFrequencyEntry] = {
     var tmp = new MutableList[TermFrequencyEntry]
     val dummy = TermFrequencyEntry("", -1.0)
     for (_ <- 1 to n) {
@@ -139,7 +139,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     frequencies
   }
 
-  private def buildStopListByFreq(n: Int, freqInfo: FrequencyMap)(implicit context: RequestContext): MutableSet[String] = {
+  private def buildStopListByFreq(n: Int, freqInfo: FrequencyMap): MutableSet[String] = {
     var stoplist: MutableSet[String] = new MutableHashSet[String]
     val topNByFreq = getTopNByFreq(n, freqInfo)
     topNByFreq.foreach { entry =>
@@ -148,7 +148,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     stoplist
   }
 
-  private def buildStopListByFreqs(n: Int, freqInfo1: FrequencyMap, freqInfo2: FrequencyMap)(implicit context: RequestContext): MutableSet[String] = {
+  private def buildStopListByFreqs(n: Int, freqInfo1: FrequencyMap, freqInfo2: FrequencyMap): MutableSet[String] = {
     var freqMap = new MutableHashMap[String, Double]
     for ((term, freq) <- freqInfo1) {
       if (freqInfo2.contains(term)) {
@@ -183,6 +183,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     val callerStopListString = params.get(TesseraeCompareParams.SL, "").trim
     val stbasis = params.get(TesseraeCompareParams.SB, DEFAULT_STOP_BASIS)
     val freqbasis = params.get(TesseraeCompareParams.FB, DEFAULT_FREQ_BASIS)
+    val scorebasis = params.get(TesseraeCompareParams.SCB, DEFAULT_SCORE_BASIS)
 
     val metricStr = params.get(TesseraeCompareParams.METRIC)
     val metric = if (metricStr == null) {
@@ -204,7 +205,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
       CacheKey(maxDistance, minCommonTerms, metric,
         params.get(TesseraeCompareParams.SQ), params.get(TesseraeCompareParams.SF), params.get(TesseraeCompareParams.SFL),
         params.get(TesseraeCompareParams.TQ), params.get(TesseraeCompareParams.TF), params.get(TesseraeCompareParams.TFL),
-        stopWords, callerStopListString, stbasis, freqbasis)
+        stopWords, callerStopListString, stbasis, freqbasis, scorebasis)
 
     var cachedResults: Option[CacheValue] = None
     if (readCache) {
@@ -227,16 +228,12 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     val (sortedResults, sourceFieldList, targetFieldList, stoplist, fromCache) = cachedResults match {
       case None => {
         val ctx = CommonMetrics.uncachedCompareTime.time()
-        val file = new File("/tmp/test.txt")
-        val bw = new BufferedWriter(new FileWriter(file))
         try {
-          bw.write("Starting calculations\n")
           val paramsVector = ParVector(sourceParams, targetParams)
           paramsVector.tasksupport = new ForkJoinTaskSupport(workerPool)
           val gatherInfoResults = paramsVector.map { qp: QueryParameters => gatherInfo(req, rsp, qp) }.toList
           val sourceInfo = gatherInfoResults(0)
           val targetInfo = gatherInfoResults(1)
-          bw.write("Query for stbasis: " + stbasis + "\n")
           val _stoplist: MutableSet[String] = if (stopWords <= 0) {
             new MutableHashSet
           } else if (!callerStopListString.isEmpty) {
@@ -252,38 +249,25 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
             val sourceLemmaFreqs = getFrequencies(buildLemmaFrequencies(sourceInfo))
             val targetLemmaFreqs = getFrequencies(buildLemmaFrequencies(targetInfo))
             val rv = buildStopListByFreqs(stopWords, sourceLemmaFreqs, targetLemmaFreqs)
-            bw.write(stopWords.toString + "\n")
-            bw.write(rv.size + "\n")
-            bw.write("Completed\n")
             rv
           } else if (stbasis == "source") {
             val sourceLemmaFreqs = getFrequencies(buildLemmaFrequencies(sourceInfo))
             val rv = buildStopListByFreq(stopWords, sourceLemmaFreqs)
-            bw.write(stopWords.toString + "\n")
-            bw.write(rv.size + "\n")
-            bw.write("Completed\n")
             rv
           } else if (stbasis == "target") {
             val targetLemmaFreqs = getFrequencies(buildLemmaFrequencies(targetInfo))
             val rv = buildStopListByFreq(stopWords, targetLemmaFreqs)
-            bw.write(stopWords.toString + "\n")
-            bw.write(rv.size + "\n")
-            bw.write("Completed\n")
             rv
           } else {
             // stbasis == "corpus"
             val rv = corpusDB.getTopN(stopWords)
-            bw.write(stopWords.toString + "\n")
-            bw.write(rv.size + "\n")
-            bw.write("Completed\n")
             rv
           }
 
-          (compare(sourceInfo, targetInfo, freqbasis, maxDistance, _stoplist, scoreCutoff, minCommonTerms, metric),
+          (compare(sourceInfo, targetInfo, freqbasis, scorebasis, maxDistance, _stoplist, scoreCutoff, minCommonTerms, metric),
             sourceInfo.fieldList, targetInfo.fieldList, _stoplist, false)
         } finally {
           ctx.stop()
-          bw.close()
         }
       }
       case Some(cv) => {
@@ -299,10 +283,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
 
     time("formatting", enabled=false) {
       val timer = CommonMetrics.resultsFormattingTime.time()
-      val file = new File("/tmp/post.txt")
-      val bw = new BufferedWriter(new FileWriter(file))
       try {
-        bw.write("Started\n")
         val results = sortedResults.drop(start).take(rows)
         val totalResultCount = sortedResults.length
 
@@ -377,8 +358,6 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
         rsp.add("cached", fromCache)
       } finally {
         timer.stop()
-        bw.write("Completed\n")
-        bw.close()
       }
     }
   }
@@ -460,7 +439,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     }
   }
 
-  private def buildMashAndFreq(source: QueryInfo, target: QueryInfo)(implicit context: RequestContext): (Mash, FrequencyMap, Mash, FrequencyMap) = {
+  private def buildMashAndFreq(source: QueryInfo, target: QueryInfo, buildFrequencies: (QueryInfo) => AggregateTermInfo)(implicit context: RequestContext): (Mash, FrequencyMap, Mash, FrequencyMap) = {
     // A mash maps one term to a set of document ids. Build them in parallel.
     val parvector = ParVector((source, true), (target, false))
     parvector.tasksupport = new ForkJoinTaskSupport(workerPool)
@@ -468,7 +447,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     val mashAndFreqResults = time("buildMash & frequency stuff", enabled=false) {
       parvector.map { case (qi: QueryInfo, b: Boolean) =>
         val mash = buildMash(qi)
-        val frequencyInfo = buildTermFrequencies(qi)
+        val frequencyInfo = buildFrequencies(qi)
         val digested = getFrequencies(frequencyInfo)
         (mash, digested)
       }.toList
@@ -520,19 +499,12 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
 
       val finalFrequencies = new MutableHashMap[String, Double]
 
-      val file = new File("/tmp/textCorpFreqs.txt")
-      val bw = new BufferedWriter(new FileWriter(file))
-      try {
       for ((term, lemmata) <- wordsToStems) {
         var freq_values: Double = 0.0
         lemmata.foreach { lemma =>
           freq_values += corpusNonFormFrequencies.getOrElse(lemma, 0.0)
         }
-        bw.write(term + "\t" + freq_values.toString + lemmata.size.toString + "\n")
         finalFrequencies += term -> freq_values / lemmata.size
-      }
-      } finally {
-      bw.close()
       }
 
       finalFrequencies
@@ -541,57 +513,49 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
 
   private def compare(source: QueryInfo,
                       target: QueryInfo,
-                      freqBasis: String,
+                      freqBasis: String, scoreBasis: String,
                       maxDistance: Int, stoplist: MutableSet[String], scoreCutoff: Double,
                       minCommonTerms: Int, distanceMetric: DistanceMetrics.Value)(implicit context: RequestContext): List[CompareResult] = {
 
     time("compare", enabled=false) {
-      val (sourceMash, sourceFrequencies, targetMash, targetFrequencies) = buildMashAndFreq(source, target)
+      val (sourceMash, sourceFrequencies, targetMash, targetFrequencies) = if (scoreBasis == "word") {
+        buildMashAndFreq(source, target, buildFormFrequencies)
+      } else {
+        buildMashAndFreq(source, target, buildTermFrequencies)
+      }
 
       // Find the overlapping documents
       val foundPairs = time ("findDocumentPairs", enabled=false) {
-        val file = new File("/tmp/stop.txt")
-        val bw = new BufferedWriter(new FileWriter(file))
         val fpTimer = CommonMetrics.findDocumentPairs.time()
         try {
-          stoplist.foreach { stopword =>
-            bw.write(stopword + "\n")
-          }
           findDocumentPairs(sourceMash, targetMash, stoplist)
         } finally {
           fpTimer.stop()
-          bw.close()
         }
       }
 
-      val file = new File("/tmp/compare.txt")
-      val bw = new BufferedWriter(new FileWriter(file))
-      try {
       // Only consider documents with 2 or more unique terms in common
-      bw.write("Starting filteredPairs\n")
       val filteredPairs = time("filter pairs", enabled=false) { foundPairs.filter { case (_, dpi) => {
         dpi.targetTerms.size >= minCommonTerms && dpi.sourceTerms.size >= minCommonTerms
       }}}
 
-      bw.write("Starting deduplicate\n")
       // If there's an (a, b) and a (b, a) match, remove one
       val docPairs = deduplicate(filteredPairs)
 
-      bw.write("Starting getMetric\n")
       val distMetric = getMetric(distanceMetric, maxDistance)
 
-      bw.write("Starting DigestedFrequencyInfo\n")
       val frequencyInfo = if (freqBasis != "corpus") {
         // Build up information about the source and target frequencies
         DigestedFrequencyInfo(sourceFrequencies, targetFrequencies)
       } else {
         // Build up information about corpus frequencies
-        val corpusNonFormFrequencies = corpusDB.getCorpusFrequencies()
-        bw.write("Finished corpus frequencies\n")
-        val sourceCorpusFrequencies = buildTextCorpusFrequencies(source, corpusNonFormFrequencies)
-        bw.write("Finished source corpus frequencies\n")
-        val targetCorpusFrequencies = buildTextCorpusFrequencies(target, corpusNonFormFrequencies)
-        bw.write("Finished target corpus frequencies\n")
+        val corpusFrequencies = if (scoreBasis == "word") {
+          corpusDB.getCorpusFrequencies(true)
+        } else {
+          corpusDB.getCorpusFrequencies(false)
+        }
+        val sourceCorpusFrequencies = buildTextCorpusFrequencies(source, corpusFrequencies)
+        val targetCorpusFrequencies = buildTextCorpusFrequencies(target, corpusFrequencies)
         DigestedFrequencyInfo(sourceCorpusFrequencies, targetCorpusFrequencies)
       }
 
@@ -599,7 +563,6 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
       val parallelPairs = docPairs.par
       parallelPairs.tasksupport = new ForkJoinTaskSupport(workerPool)
 
-      bw.write("Starting parallel\n")
       val mappedResults = time("calculate distance & score", enabled=false) {
         parallelPairs.map { case (pair: DocumentPair, pairInfo: DocumentPairInfo) =>
           val sourceTerms = pairInfo.sourceTerms.keySet.map { st => st.term }.toSet
@@ -652,14 +615,9 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
         }.filter(_.isDefined).map(_.get)
       }
 
-      bw.write("Starting sort\n")
       // Sort by score
       val sortedScores = mappedResults.toList.sortWith { (a, b) => a.score > b.score }
-      bw.write("Completed\n")
       sortedScores
-      } finally {
-        bw.close()
-      }
     }
   }
 
@@ -676,6 +634,22 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
         }
       }
 
+      AggregateTermInfo(countByWord, totalWords)
+    }
+  }
+
+  private def buildFormFrequencies(queryInfo: QueryInfo)(implicit context: RequestContext): AggregateTermInfo = {
+    time("buildLemmaFrequencies", enabled=false) {
+      val countByWord: MutableMap[String, Int] = new MutableHashMap
+      var totalWords = 0
+
+      queryInfo.termInfo.foreach { case (docId, dti) =>
+        dti.formTermCounts.foreach { case (term, count) =>
+          val theCount = count + countByWord.getOrElse(term, 0)
+          countByWord += term -> theCount
+          totalWords += count
+        }
+      }
       AggregateTermInfo(countByWord, totalWords)
     }
   }
@@ -723,6 +697,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
 
       val countByFeature: MutableMap[String, Int] = new MutableHashMap
 
+      // ?? count all forms of a given lemma together? (Nozomu's guess)
       countByWord.keySet.foreach { word1 =>
         val alreadySeen: MutableSet[String] = new MutableHashSet
         wordsToStems.get(word1).map { w1 =>
@@ -749,19 +724,13 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
     val match_target: TargetToSourceToF2NF = new MutableHashMap
     val match_source: TargetToSourceToF2NF = new MutableHashMap
 
-    val file = new File("/tmp/find.txt")
-    val bw = new BufferedWriter(new FileWriter(file))
-    try {
-    bw.write("first loop\n")
     // populate match_target and match_source
     time("first loop (findDocumentPairs)", enabled=false) {
-    bw.write("in time 1\n")
       sourceMash.nonFormsToDocs.foreach { case (term, sourceDocs) =>
         if (!targetMash.nonFormsToDocs.contains(term)) {
           // continue
         } else if (stoplist.contains(term)) {
           // continue
-          bw.write("in foreach 1 (found stoplist term \""+ term + "\")\n")
         } else {
           val targetDocs = targetMash.nonFormsToDocs(term)
           sourceDocs.foreach { sourceDocId =>
@@ -790,9 +759,7 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
 
     val pairInfo: MutableMap[DocumentPair, DocumentPairInfo] = new MutableHashMap
 
-    bw.write("second loop\n")
     time("second loop (findDocumentPairs)", enabled=false) {
-    bw.write("in time 2\n")
       match_target.foreach { case (targetDocId, sourceToF2NF) =>
         sourceToF2NF.foreach { case (sourceDocId, f2nf) =>
           if (sourceDocId == targetDocId) {
@@ -826,7 +793,6 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
                   if (seenForms.size < 2) {
                     // continue
                   } else {
-                    bw.write("in foreach 2\n")
                     val pair = DocumentPair(sourceDocId, targetDocId)
                     val dpi = pairInfo.getOrElseUpdate(pair, DocumentPairInfo(new MutableHashMap, new MutableHashMap))
                     dpi.targetTerms ++= f2nf
@@ -839,12 +805,8 @@ final class TesseraeCompareHandler extends RequestHandlerBase {
         }
       }
     }
-    bw.write("Completed\n")
 
     pairInfo
-    } finally {
-      bw.close()
-    }
   }
 
   private def buildMash(qi: QueryInfo)(implicit context: RequestContext): Mash = {
@@ -1042,6 +1004,7 @@ object TesseraeCompareHandler {
   val DEFAULT_MIN_COMMON_TERMS = 2 // can't be less than 2
   val DEFAULT_STOP_BASIS = "corpus"
   val DEFAULT_FREQ_BASIS = "texts"
+  val DEFAULT_SCORE_BASIS = "stem"
   val DEFAULT_HIGHLIGHT = false
   val SPLIT_REGEX = ",| ".r
 }

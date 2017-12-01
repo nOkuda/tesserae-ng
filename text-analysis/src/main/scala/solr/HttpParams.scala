@@ -52,6 +52,9 @@ object TesseraeCompareParams {
   // frequency basis
   val FB = PREFIX + "fb"
 
+  // score basis
+  val SCB = PREFIX + "scb"
+
   // include highlight info?
   val HIGHLIGHT = PREFIX + "highlight"
 }

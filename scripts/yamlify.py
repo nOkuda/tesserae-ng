@@ -23,10 +23,10 @@ def _parse_filename(filename):
     return _casify(sections[0]), _casify(sections[1])
 
 
-def _make_yaml(filename):
+def _make_yaml(textroot, filename):
     """Makes yaml file"""
     author, title = _parse_filename(filename)
-    with open(filename[:-4] + 'yaml', 'w') as ofh:
+    with open(os.path.join(textroot, filename[:-4] + 'yaml'), 'w') as ofh:
         ofh.write('auto_ingest: true\n')
         ofh.write('index: true\n')
         ofh.write('language: latin\n')
@@ -64,7 +64,7 @@ def _run():
     args = _parse_args()
     for filename in os.listdir(args.dirname):
         if os.path.isfile(filename) and filename.endswith('.tess'):
-            _make_yaml(filename)
+            _make_yaml(args.dirname, filename)
 
 
 if __name__ == '__main__':

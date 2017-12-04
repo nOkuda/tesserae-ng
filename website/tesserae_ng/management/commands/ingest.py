@@ -6,7 +6,8 @@ from optparse import make_option
 from os.path import dirname, basename, abspath, exists, isfile, join, isabs
 from django.core.management.base import BaseCommand, CommandError
 from website.tesserae_ng.models import SourceText, SourceTextSentence
-from website.tesserae_ng.core_search import parse_text, TESS_MODES
+from website.tesserae_ng.core_search import parse_text
+from website.tesserae_ng.parse_tess import TESS_MODES
 
 
 MODES_TUPLE = str(tuple(sorted(TESS_MODES.keys())))

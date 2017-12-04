@@ -12,7 +12,7 @@ def _parse_tess_line(text_value):
 
     # Input files must be in .tess format
     lines = []
-    rex = r'^<([^>]+)>[\t](.*)$'
+    rex = r'^<([^>]+)>\s+(.*)$'
     lrex = r'([0-9]+)(-([0-9]+))?$'
 
     for line in re.split(r'[\n\r]+', text_value):
